@@ -1,0 +1,699 @@
+                            if (data.settings) this.settings = { ...this.settings, ...data.settings };
+                            if (data.streak) this.streak = data.streak;
+                            
+                            this.saveData();
+                            this.saveSettings();
+                            this.saveStreak();
+                            this.applySettingsToUI();
+                            this.render();
+                            
+                            Toast.success('Data imported successfully!');
+                        }
+                    } catch (err) {
+                        console.error('Import error:', err);
+                        Toast.error('Failed to import data. Invalid file format.');
+                    }
+                };
+                reader.readAsText(file);
+                e.target.value = '';
+            },
+
+            clearAllData() {
+                if (confirm('⚠️ Delete ALL data? This cannot be undone!')) {
+                    if (confirm('Are you absolutely sure? All bills will be permanently deleted.')) {
+                        this.bills = [];
+                        this.recurringBills = [];
+                        this.streak = { current: 0, best: 0, lastPayment: null };
+                        
+                        localStorage.removeItem(CONFIG.STORAGE_KEYS.BILLS);
+                        localStorage.removeItem(CONFIG.STORAGE_KEYS.RECURRING);
+                        localStorage.removeItem(CONFIG.STORAGE_KEYS.STREAK);
+                        
+                        this.render();
+                        Toast.success('All data cleared');
+                    }
+                }
+            },
+
+            // ----------------------------------------
+            // MODAL MANAGEMENT
+            // ----------------------------------------
+            openModal(modalId) {
+                const modal = document.getElementById(modalId);
+                if (modal) {
+                    modal.classList.add('show');
+                    document.body.style.overflow = 'hidden';
+                }
+            },
+
+            closeModal(modalId) {
+                const modal = document.getElementById(modalId);
+                if (modal) {
+                    modal.classList.remove('show');
+                    document.body.style.overflow = '';
+                }
+            },
+
+            // ----------------------------------------
+            // KEYBOARD SHORTCUTS
+            // ----------------------------------------
+            handleKeyboardShortcuts(e) {
+                // Don't trigger if typing in input
+                if (e.target.matches('input, textarea, select')) return;
+
+                const key = e.key.toLowerCase();
+
+                switch (key) {
+                    case 'n':
+                        e.preventDefault();
+                        this.switchTab('add');
+                        document.getElementById('billName')?.focus();
+                        break;
+                    case '/':
+                        e.preventDefault();
+                        this.switchTab('bills');
+                        document.getElementById('searchInput')?.focus();
+                        break;
+                    case '1':
+                        e.preventDefault();
+                        this.switchTab('bills');
+                        break;
+                    case '2':
+                        e.preventDefault();
+                        this.switchTab('calendar');
+                        break;
+                    case '3':
+                        e.preventDefault();
+                        this.switchTab('analytics');
+                        break;
+                    case 'd':
+                        e.preventDefault();
+                        this.toggleTheme();
+                        break;
+                    case '?':
+                        e.preventDefault();
+                        this.openModal('shortcutsModal');
+                        break;
+                    case 'escape':
+                        document.querySelectorAll('.modal-backdrop.show').forEach(m => {
+                            this.closeModal(m.id);
+                        });
+                        break;
+                }
+            },
+
+            // ----------------------------------------
+            // CALENDAR
+            // ----------------------------------------
+            navigateCalendar(direction) {
+                this.currentCalendarDate.setMonth(this.currentCalendarDate.getMonth() + direction);
+                this.renderCalendar();
+            },
+
+            renderCalendar() {
+                const grid = document.getElementById('calendarGrid');
+                const title = document.getElementById('calendarTitle');
+                if (!grid || !title) return;
+
+                const year = this.currentCalendarDate.getFullYear();
+                const month = this.currentCalendarDate.getMonth();
+
+                title.textContent = `${Utils.getMonthName(month)} ${year}`;
+
+                // Clear grid
+                grid.innerHTML = '';
+
+                // Add weekday headers
+                const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                weekdays.forEach(day => {
+                    const dayEl = document.createElement('div');
+                    dayEl.className = 'calendar-weekday';
+                    dayEl.textContent = day;
+                    grid.appendChild(dayEl);
+                });
+
+                // Get first day of month and total days
+                const firstDay = new Date(year, month, 1).getDay();
+                const daysInMonth = Utils.getDaysInMonth(year, month);
+                const daysInPrevMonth = Utils.getDaysInMonth(year, month - 1);
+
+                // Get today
+                const today = new Date();
+                const isCurrentMonth = today.getFullYear() === year && today.getMonth() === month;
+
+                // Previous month days
+                for (let i = firstDay - 1; i >= 0; i--) {
+                    const dayEl = document.createElement('div');
+                    dayEl.className = 'calendar-day other-month';
+                    dayEl.innerHTML = `<span class="calendar-day-number">${daysInPrevMonth - i}</span>`;
+                    grid.appendChild(dayEl);
+                }
+
+                // Current month days
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+                    const billsOnDay = this.bills.filter(b => b.dueDate === dateStr);
+                    const hasOverdue = billsOnDay.some(b => !b.paid && Utils.isOverdue(dateStr));
+                    const hasUnpaid = billsOnDay.some(b => !b.paid);
+
+                    const dayEl = document.createElement('div');
+                    dayEl.className = 'calendar-day';
+                    
+                    if (isCurrentMonth && day === today.getDate()) {
+                        dayEl.classList.add('today');
+                    }
+                    if (hasOverdue) {
+                        dayEl.classList.add('has-overdue');
+                    } else if (hasUnpaid) {
+                        dayEl.classList.add('has-bills');
+                    }
+
+                    let billDotsHtml = '';
+                    if (billsOnDay.length > 0) {
+                        billDotsHtml = '<div class="calendar-day-bills">';
+                        billsOnDay.slice(0, 3).forEach(bill => {
+                            let dotClass = 'paid';
+                            if (!bill.paid) {
+                                dotClass = Utils.isOverdue(bill.dueDate) ? 'overdue' : 'unpaid';
+                            }
+                            billDotsHtml += `<div class="calendar-bill-dot ${dotClass}"></div>`;
+                        });
+                        if (billsOnDay.length > 3) {
+                            billDotsHtml += `<div style="font-size: 0.6rem; color: var(--text-muted);">+${billsOnDay.length - 3}</div>`;
+                        }
+                        billDotsHtml += '</div>';
+                    }
+
+                    dayEl.innerHTML = `
+                        <span class="calendar-day-number">${day}</span>
+                        ${billDotsHtml}
+                    `;
+
+                    if (billsOnDay.length > 0) {
+                        dayEl.addEventListener('click', () => this.showDayBills(dateStr, billsOnDay));
+                    }
+
+                    grid.appendChild(dayEl);
+                }
+
+                // Next month days to fill grid
+                const totalCells = firstDay + daysInMonth;
+                const remainingCells = totalCells % 7 === 0 ? 0 : 7 - (totalCells % 7);
+                
+                for (let i = 1; i <= remainingCells; i++) {
+                    const dayEl = document.createElement('div');
+                    dayEl.className = 'calendar-day other-month';
+                    dayEl.innerHTML = `<span class="calendar-day-number">${i}</span>`;
+                    grid.appendChild(dayEl);
+                }
+            },
+
+            showDayBills(dateStr, bills) {
+                const title = document.getElementById('dayBillsTitle');
+                const list = document.getElementById('dayBillsList');
+                
+                if (!title || !list) return;
+
+                title.textContent = `📅 Bills for ${Utils.formatDate(dateStr)}`;
+                
+                list.innerHTML = bills.map(bill => `
+                    <div class="bill-card ${bill.paid ? 'paid' : ''} ${!bill.paid && Utils.isOverdue(bill.dueDate) ? 'overdue' : ''}" style="margin-bottom: 12px;">
+                        <div class="bill-checkbox ${bill.paid ? 'checked' : ''}" onclick="App.togglePaid('${bill.id}'); App.closeModal('dayBillsModal');">
+                            ${bill.paid ? '✓' : ''}
+                        </div>
+                        <div class="bill-content">
+                            <div class="bill-header">
+                                <span class="bill-name">${Utils.sanitize(bill.name)}</span>
+                            </div>
+                        </div>
+                        <div class="bill-amount">${Utils.formatCurrency(bill.amount)}</div>
+                    </div>
+                `).join('');
+
+                this.openModal('dayBillsModal');
+            },
+
+            // ----------------------------------------
+            // ANALYTICS
+            // ----------------------------------------
+            renderAnalytics() {
+                this.renderBudgetOverview();
+                this.renderCategoryChart();
+                this.renderMonthlyChart();
+                this.renderPerformanceStats();
+            },
+
+            renderBudgetOverview() {
+                const budget = this.settings.monthlyBudget || 0;
+                const today = new Date();
+                const currentMonth = today.getMonth();
+                const currentYear = today.getFullYear();
+
+                // Calculate spending this month
+                const monthlyBills = this.bills.filter(b => {
+                    const billDate = new Date(b.dueDate);
+                    return billDate.getMonth() === currentMonth && billDate.getFullYear() === currentYear;
+                });
+
+                const spent = monthlyBills.reduce((sum, b) => sum + (b.paidAmount || (b.paid ? b.amount : 0)), 0);
+                const totalDue = monthlyBills.reduce((sum, b) => sum + b.amount, 0);
+
+                const remaining = budget - spent;
+                const percent = budget > 0 ? Math.min((spent / budget) * 100, 100) : 0;
+
+                // Days left in month
+                const daysInMonth = Utils.getDaysInMonth(currentYear, currentMonth);
+                const daysLeft = daysInMonth - today.getDate();
+
+                // Update UI
+                document.getElementById('budgetSpent').textContent = Utils.formatCurrency(spent);
+                document.getElementById('budgetTotal').textContent = Utils.formatCurrency(budget || totalDue);
+                document.getElementById('budgetRemaining').textContent = budget > 0 ? 
+                    `${Utils.formatCurrency(remaining)} left` : 
+                    `${Utils.formatCurrency(totalDue - spent)} unpaid`;
+                document.getElementById('budgetPercent').textContent = percent.toFixed(0);
+                document.getElementById('budgetDaysLeft').textContent = `${daysLeft} days left this month`;
+
+                const progressBar = document.getElementById('budgetProgressBar');
+                if (progressBar) {
+                    progressBar.style.width = `${percent}%`;
+                    progressBar.classList.remove('warning', 'danger');
+                    if (percent > 90) {
+                        progressBar.classList.add('danger');
+                    } else if (percent > 70) {
+                        progressBar.classList.add('warning');
+                    }
+                }
+            },
+
+            renderCategoryChart() {
+                const categoryTotals = {};
+                let total = 0;
+
+                this.bills.forEach(bill => {
+                    const cat = bill.category || 'other';
+                    categoryTotals[cat] = (categoryTotals[cat] || 0) + bill.amount;
+                    total += bill.amount;
+                });
+
+                // Update total
+                document.getElementById('totalSpending').textContent = Utils.formatCurrency(total);
+
+                // Render legend
+                const legend = document.getElementById('categoryLegend');
+                if (!legend) return;
+
+                const sortedCategories = Object.entries(categoryTotals)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 6);
+
+                legend.innerHTML = sortedCategories.map(([cat, amount]) => {
+                    const catInfo = CONFIG.CATEGORIES[cat] || CONFIG.CATEGORIES.other;
+                    const percent = total > 0 ? ((amount / total) * 100).toFixed(1) : 0;
+                    
+                    return `
+                        <div class="donut-legend-item">
+                            <div class="donut-legend-color" style="background: ${catInfo.color}"></div>
+                            <div class="donut-legend-info">
+                                <div class="donut-legend-name">${catInfo.icon} ${catInfo.name}</div>
+                                <div class="donut-legend-value">${Utils.formatCurrency(amount)} (${percent}%)</div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                // Render SVG donut chart
+                const chart = document.getElementById('categoryChart');
+                if (!chart) return;
+
+                const svg = chart.querySelector('svg');
+                if (!svg) return;
+
+                // Clear existing segments
+                svg.innerHTML = '<circle cx="50" cy="50" r="40" fill="none" stroke="var(--bg-tertiary)" stroke-width="20"/>';
+
+                if (total === 0) return;
+
+                let currentAngle = 0;
+                const radius = 40;
+                const circumference = 2 * Math.PI * radius;
+
+                sortedCategories.forEach(([cat, amount]) => {
+                    const catInfo = CONFIG.CATEGORIES[cat] || CONFIG.CATEGORIES.other;
+                    const percent = amount / total;
+                    const segmentLength = circumference * percent;
+                    const gapLength = circumference - segmentLength;
+
+                    const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+                    circle.setAttribute('cx', '50');
+                    circle.setAttribute('cy', '50');
+                    circle.setAttribute('r', radius.toString());
+                    circle.setAttribute('fill', 'none');
+                    circle.setAttribute('stroke', catInfo.color);
+                    circle.setAttribute('stroke-width', '20');
+                    circle.setAttribute('stroke-dasharray', `${segmentLength} ${gapLength}`);
+                    circle.setAttribute('stroke-dashoffset', (-currentAngle * circumference / 360).toString());
+                    circle.style.transition = 'stroke-dasharray 0.5s ease';
+
+                    svg.appendChild(circle);
+                    currentAngle += percent * 360;
+                });
+            },
+
+            renderMonthlyChart() {
+                const chart = document.getElementById('monthlyChart');
+                if (!chart) return;
+
+                // Get last 6 months of data
+                const monthlyData = [];
+                const today = new Date();
+
+                for (let i = 5; i >= 0; i--) {
+                    const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
+                    const month = date.getMonth();
+                    const year = date.getFullYear();
+                    
+                    const monthBills = this.bills.filter(b => {
+                        const billDate = new Date(b.dueDate);
+                        return billDate.getMonth() === month && billDate.getFullYear() === year;
+                    });
+
+                    const total = monthBills.reduce((sum, b) => sum + b.amount, 0);
+                    
+                    monthlyData.push({
+                        month: Utils.getMonthName(month).slice(0, 3),
+                        total
+                    });
+                }
+
+                const maxValue = Math.max(...monthlyData.map(d => d.total), 1);
+
+                chart.innerHTML = monthlyData.map(data => {
+                    const height = (data.total / maxValue) * 150;
+                    return `
+                        <div class="bar-group">
+                            <div class="bar" style="height: ${Math.max(height, 4)}px;">
+                                <span class="bar-value">${Utils.formatCurrency(data.total)}</span>
+                            </div>
+                            <span class="bar-label">${data.month}</span>
+                        </div>
+                    `;
+                }).join('');
+            },
+
+            renderPerformanceStats() {
+                // On-time rate
+                const paidBills = this.bills.filter(b => b.paid && b.paidAt);
+                let onTime = 0;
+                
+                paidBills.forEach(bill => {
+                    const dueDate = new Date(bill.dueDate);
+                    const paidDate = new Date(bill.paidAt);
+                    if (paidDate <= dueDate) onTime++;
+                });
+
+                const onTimeRate = paidBills.length > 0 ? ((onTime / paidBills.length) * 100).toFixed(0) : 0;
+                document.getElementById('onTimeRate').textContent = `${onTimeRate}%`;
+
+                // Average monthly
+                const today = new Date();
+                const monthlyTotals = {};
+                
+                this.bills.forEach(bill => {
+                    const date = new Date(bill.dueDate);
+                    const key = `${date.getFullYear()}-${date.getMonth()}`;
+                    monthlyTotals[key] = (monthlyTotals[key] || 0) + bill.amount;
+                });
+
+                const months = Object.values(monthlyTotals);
+                const avgMonthly = months.length > 0 ? months.reduce((a, b) => a + b, 0) / months.length : 0;
+                document.getElementById('avgMonthly').textContent = Utils.formatCurrency(avgMonthly);
+
+                // Best streak
+                document.getElementById('bestStreak').textContent = this.streak.best;
+
+                // Year total
+                const currentYear = today.getFullYear();
+                const yearTotal = this.bills
+                    .filter(b => new Date(b.dueDate).getFullYear() === currentYear)
+                    .reduce((sum, b) => sum + b.amount, 0);
+                document.getElementById('yearTotal').textContent = Utils.formatCurrency(yearTotal);
+            },
+
+            // ----------------------------------------
+            // RENDERING
+            // ----------------------------------------
+            render() {
+                this.renderBills();
+                this.renderRecurringBills();
+                this.updateStats();
+                this.updateUnpaidBadge();
+            },
+
+            getFilteredAndSortedBills() {
+                let filtered = [...this.bills];
+
+                // Search
+                if (this.searchQuery) {
+                    filtered = filtered.filter(bill =>
+                        bill.name.toLowerCase().includes(this.searchQuery) ||
+                        (bill.category && bill.category.toLowerCase().includes(this.searchQuery)) ||
+                        (bill.notes && bill.notes.toLowerCase().includes(this.searchQuery)) ||
+                        (bill.tags && bill.tags.some(t => t.toLowerCase().includes(this.searchQuery)))
+                    );
+                }
+
+                // Filter
+                switch (this.currentFilter) {
+                    case 'paid':
+                        filtered = filtered.filter(b => b.paid);
+                        break;
+                    case 'unpaid':
+                        filtered = filtered.filter(b => !b.paid);
+                        break;
+                    case 'overdue':
+                        filtered = filtered.filter(b => !b.paid && Utils.isOverdue(b.dueDate));
+                        break;
+                }
+
+                // Sort
+                const [field, dir] = this.currentSort.split('-');
+                filtered.sort((a, b) => {
+                    let valA, valB;
+                    
+                    switch (field) {
+                        case 'dueDate':
+                            valA = new Date(a.dueDate);
+                            valB = new Date(b.dueDate);
+                            break;
+                        case 'amount':
+                            valA = a.amount;
+                            valB = b.amount;
+                            break;
+                        case 'name':
+                            valA = a.name.toLowerCase();
+                            valB = b.name.toLowerCase();
+                            break;
+                        default:
+                            valA = new Date(a.dueDate);
+                            valB = new Date(b.dueDate);
+                    }
+
+                    return dir === 'asc' ? (valA > valB ? 1 : -1) : (valA < valB ? 1 : -1);
+                });
+
+                return filtered;
+            },
+
+            renderBills() {
+                const container = document.getElementById('billsList');
+                if (!container) return;
+
+                const bills = this.getFilteredAndSortedBills();
+
+                if (bills.length === 0) {
+                    const message = this.searchQuery || this.currentFilter !== 'all'
+                        ? 'No bills match your criteria.'
+                        : 'No bills yet. Add your first bill to get started!';
+
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📭</div>
+                            <h3>No Bills Found</h3>
+                            <p>${message}</p>
+                            <button class="btn btn-primary" onclick="App.switchTab('add')">
+                                <span>➕</span> Add Bill
+                            </button>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = bills.map(bill => {
+                    const overdue = !bill.paid && Utils.isOverdue(bill.dueDate);
+                    const dueSoon = !bill.paid && !overdue && Utils.isDueSoon(bill.dueDate, this.settings.reminderDays);
+                    const catInfo = bill.category ? CONFIG.CATEGORIES[bill.category] : null;
+                    
+                    let statusClass = '';
+                    if (bill.paid) statusClass = 'paid';
+                    else if (overdue) statusClass = 'overdue';
+                    else if (dueSoon) statusClass = 'due-soon';
+
+                    // Calculate payment progress
+                    const paidPercent = bill.amount > 0 ? ((bill.paidAmount || 0) / bill.amount) * 100 : 0;
+                    const hasPartialPayment = bill.paidAmount > 0 && bill.paidAmount < bill.amount;
+
+                    // Tags HTML
+                    const tagsHtml = bill.tags && bill.tags.length > 0 
+                        ? bill.tags.map(t => `<span class="badge badge-tag">${Utils.sanitize(t)}</span>`).join('')
+                        : '';
+
+                    return `
+                        <div class="bill-card ${statusClass}" data-id="${bill.id}">
+                            <div class="bill-checkbox ${bill.paid ? 'checked' : ''}" onclick="App.togglePaid('${bill.id}')">
+                                ${bill.paid ? '✓' : ''}
+                            </div>
+                            <div class="bill-content">
+                                <div class="bill-header">
+                                    <span class="bill-name">${Utils.sanitize(bill.name)}</span>
+                                    <div class="bill-badges">
+                                        ${bill.recurring ? '<span class="badge badge-recurring">🔄 Recurring</span>' : ''}
+                                        ${overdue ? '<span class="badge badge-overdue">Overdue</span>' : ''}
+                                        ${dueSoon ? '<span class="badge badge-due-soon">Due Soon</span>' : ''}
+                                        ${catInfo ? `<span class="badge badge-category">${catInfo.icon} ${catInfo.name}</span>` : ''}
+                                        ${tagsHtml}
+                                    </div>
+                                </div>
+                                <div class="bill-meta">
+                                    <span class="bill-meta-item">📅 ${Utils.formatDate(bill.dueDate)}</span>
+                                    ${bill.notes ? `<span class="bill-meta-item">📝 ${Utils.sanitize(bill.notes.substring(0, 30))}${bill.notes.length > 30 ? '...' : ''}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="bill-amount-wrapper">
+                                <div class="bill-amount">${Utils.formatCurrency(bill.amount)}</div>
+                                ${hasPartialPayment ? `
+                                    <div class="bill-amount-paid">${Utils.formatCurrency(bill.paidAmount)} paid</div>
+                                    <div class="bill-progress">
+                                        <div class="bill-progress-bar" style="width: ${paidPercent}%"></div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                            <div class="bill-actions">
+                                ${!bill.paid ? `
+                                    <button class="bill-action-btn payment" onclick="App.openPaymentModal('${bill.id}')" title="Make payment">
+                                        💳
+                                    </button>
+                                ` : ''}
+                                <button class="bill-action-btn edit" onclick="App.openEditModal('${bill.id}')" title="Edit">
+                                    ✏️
+                                </button>
+                                <button class="bill-action-btn delete" onclick="App.deleteBill('${bill.id}')" title="Delete">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            },
+
+            renderRecurringBills() {
+                const container = document.getElementById('recurringList');
+                if (!container) return;
+
+                if (this.recurringBills.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔄</div>
+                            <h3>No Recurring Bills</h3>
+                            <p>Set up recurring bills to automatically track them each month.</p>
+                            <button class="btn btn-primary" onclick="App.switchTab('add'); document.getElementById('recurringToggle').click();">
+                                <span>➕</span> Add Recurring Bill
+                            </button>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = this.recurringBills.map(rb => {
+                    const freqInfo = CONFIG.FREQUENCIES[rb.frequency];
+                    const catInfo = rb.category ? CONFIG.CATEGORIES[rb.category] : null;
+                    let scheduleText = freqInfo ? freqInfo.label : rb.frequency;
+                    
+                    if (rb.frequency === 'monthly') {
+                        scheduleText += ` on day ${rb.dayOfMonth}`;
+                    }
+
+                    return `
+                        <div class="bill-card ${rb.active ? '' : 'paid'}" style="opacity: ${rb.active ? 1 : 0.6};">
+                            <div class="bill-content">
+                                <div class="bill-header">
+                                    <span class="bill-name">
+                                        ${Utils.sanitize(rb.name)}
+                                        ${!rb.active ? '<span style="color: var(--text-muted);"> (Paused)</span>' : ''}
+                                    </span>
+                                    <div class="bill-badges">
+                                        ${catInfo ? `<span class="badge badge-category">${catInfo.icon} ${catInfo.name}</span>` : ''}
+                                    </div>
+                                </div>
+                                <div class="bill-meta">
+                                    <span class="bill-meta-item">📅 ${scheduleText}</span>
+                                    <span class="bill-meta-item">💵 ${Utils.formatCurrency(rb.amount)}</span>
+                                </div>
+                            </div>
+                            <div class="bill-actions">
+                                <button class="btn ${rb.active ? 'btn-secondary' : 'btn-success'}" 
+                                        onclick="App.toggleRecurringBill('${rb.id}')"
+                                        style="padding: 8px 16px; font-size: 0.85rem;">
+                                    ${rb.active ? '⏸ Pause' : '▶️ Resume'}
+                                </button>
+                                <button class="bill-action-btn delete" onclick="App.deleteRecurringBill('${rb.id}')" title="Delete">
+                                    🗑️
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+            },
+
+            updateStats() {
+                const total = this.bills.length;
+                const paid = this.bills.filter(b => b.paid).length;
+                const pending = total - paid;
+                const overdue = this.bills.filter(b => !b.paid && Utils.isOverdue(b.dueDate)).length;
+                const totalDue = this.bills.filter(b => !b.paid).reduce((sum, b) => sum + b.amount - (b.paidAmount || 0), 0);
+
+                document.getElementById('statTotal').textContent = total;
+                document.getElementById('statPaid').textContent = paid;
+                document.getElementById('statPending').textContent = pending;
+                document.getElementById('statOverdue').textContent = overdue;
+                document.getElementById('statAmount').textContent = Utils.formatCurrency(totalDue);
+            },
+
+            updateUnpaidBadge() {
+                const unpaid = this.bills.filter(b => !b.paid).length;
+                const badge = document.getElementById('unpaidBadge');
+                
+                if (badge) {
+                    badge.textContent = unpaid;
+                    badge.style.display = unpaid > 0 ? 'inline' : 'none';
+                }
+            }
+        };
+
+        // ============================================
+        // INITIALIZE APP
+        // ============================================
+        document.addEventListener('DOMContentLoaded', () => {
+            App.init();
+        });
+
+        // Service Worker Registration for PWA (optional)
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                // Uncomment below if you have a service worker file
+                // navigator.serviceWorker.register('/sw.js');
+            });
+        }
+    </script>
+</body>
+</html>
