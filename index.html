@@ -8,16 +8,26 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="default">
     <title>Bills Tracker Pro</title>
-
-    <!-- PWA Manifest -->
-    <link rel="manifest" href="data:application/json,{ \"name\": \"Bills Tracker Pro\", \"short_name\": \"Bills\"... }">
-
-    <!-- External CSS -->
+    <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
     <div class="app-container">
-        <!-- Body content goes here -->
+        <!-- HTML content extracted from the giant file -->
+        <header class="app-header">
+            <div class="header-content">
+                <div class="header-left">
+                    <h1>Bills Tracker Pro</h1>
+                    <p>Track and manage your monthly bills with ease</p>
+                </div>
+                <div class="header-actions">
+                    <!-- Add header actions like buttons -->
+                </div>
+            </div>
+        </header>
+        <main class="main-content">
+            <!-- Main content grid, cards, tabs, etc. -->
+        </main>
     </div>
     <script src="script.js"></script>
 </body>
